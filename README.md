@@ -46,19 +46,21 @@ The **batch** package does exactly that. You configure the duration of window, p
 to load and save resource and once the request comes in - you run a function:
 
 ```go
-// set up the batch processor:
+// Set up the batch processor:
 processor := batch.StartProcessor(
-    batch.Options[*YourResource]{ // YourResource is your Go struct
+    batch.Options[*YourResource]{ // YourResource is your own Go struct
         MinDuration:  100 * time.Millisecond,
-        LoadResource: ...,
+        LoadResource: func(ctx context.Context, resourceKey string) (*YourResource, error){
+			// resourceKey uniquely identifies the resource
+			...
+        },
         SaveResource: ...,
     },
 )
 
-// following code is run from http/grpc handler
-// resourceKey uniquely identifies the resource
+// Following code is run from http/grpc handler:
 err := s.BatchProcessor.Run(resourceKey, func(r *YourResource) {
-    // here is the code which is executed inside batch  
+    // Here you put the code which will executed sequentially inside batch  
 })
 ```
 
@@ -74,7 +76,7 @@ Please note that at least **Go 1.18** is required.
 
 ## Scaling out
 
-Single Go http server is able to handle up to 10-50k of requests per second on a commodity hardware. This is a lot, but very often you also need:
+Single Go http server is able to handle up to tens of thousands of requests per second on a commodity hardware. This is a lot, but very often you also need:
 
 * high availability (if one server goes down you want other to handle the traffic)
 * you want to handle hundred thousands or millions of requests per second
@@ -85,5 +87,5 @@ Round-robin is not an option here, because sooner or later you will have problem
 (multiple server instances will run batches on the same resource). 
 Ideal solution is to route requests based on parameters or URL. 
 For example some http parameter could be a resource key. You can instruct load balancer
-to calculate hash on this parameter and always route requests with this param value 
+to calculate hash on this parameter value and always route requests with this param value 
 to the same backend (of course if all backends are still available).
