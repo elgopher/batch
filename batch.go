@@ -10,15 +10,51 @@ import (
 	"time"
 )
 
+// Options represent parameters for batch.Processor. They should be passed to StartProcessor function. All options
+// (as the name suggest) are optional and have default values.
 type Options[Resource any] struct {
-	MinDuration           time.Duration
-	MaxDuration           time.Duration
-	LoadResource          func(_ context.Context, key string) (Resource, error)
-	SaveResource          func(_ context.Context, key string, _ Resource) error
-	GoRoutines            int
-	GoRoutineNumberForKey func(_ string, goroutines int) int
+	// All batches will be run for at least MinDuration.
+	//
+	// By default, 100ms.
+	MinDuration time.Duration
+	// Batch will have timeout with MaxDuration. Context with this timeout will be passed to
+	// LoadResource and SaveResource functions, which can abort the batch by returning an error.
+	//
+	// By default, 2*MinDuration.
+	MaxDuration time.Duration
+	// LoadResource loads resource with given key from a database. Returning an error aborts the batch.
+	// This function is called in the beginning of each new batch. Context passed as a first parameter
+	// has a timeout calculated using batch MaxDuration. You can use this information to abort loading resource
+	// if it takes too long.
+	//
+	// By default, returns zero-value Resource.
+	LoadResource func(_ context.Context, key string) (Resource, error)
+	// SaveResource saves resource with given key to a database. Returning an error aborts the batch.
+	// This function is called at the end of each batch. Context passed as a first parameter
+	// has a timeout calculated using batch MaxDuration. You can use this information to abort saving resource
+	// if it takes too long.
+	//
+	// By default, does nothing.
+	SaveResource func(_ context.Context, key string, _ Resource) error
+	// GoRoutines specifies how many goroutines should be used to run batch operations.
+	//
+	// By default, 16 * number of CPUs.
+	GoRoutines int
+	// GoRoutineNumberForKey returns go-routine number which will be used to run operation on
+	// a given resource key. This function is crucial to properly serialize requests.
+	//
+	// This function must be deterministic - it should always return the same go-routine number
+	// for given combination of key and goroutines parameters.
+	//
+	// By default, GoroutineNumberForKey function is used. This implementation calculates hash
+	// on a given key and use modulo to calculate go-routine number.
+	GoRoutineNumberForKey func(key string, goroutines int) int
 }
 
+// StartProcessor starts batch processor which will run operations in batches.
+//
+// Please note that Processor is a go-routine pool internally and should be stopped when no longer needed.
+// Please use Processor.Stop method to stop it.
 func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource] {
 	options = options.withDefaults()
 
@@ -52,6 +88,7 @@ func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource
 	}
 }
 
+// Processor represents instance of batch processor which can be used to issue operations which run in a batch manner.
 type Processor[Resource any] struct {
 	options         Options[Resource]
 	stopped         chan struct{}
@@ -92,11 +129,17 @@ func (s Options[Resource]) withDefaults() Options[Resource] {
 	return s
 }
 
-// Run lets you run an operation which will be run along other operations in a single batch (as a single atomic transaction).
-// If there is no pending batch then the batch will be started. Operations are run sequentially.
+// Run lets you run an operation on a resource with given key. Operation will run along other operations in batches.
+// If there is no pending batch then the new batch will be started and will run for at least MinDuration. After the
+// MinDuration no new operations will be accepted and SaveResource function will be called.
 //
-// Run ends when the entire batch has ended.
-func (p *Processor[Resource]) Run(key string, op func(Resource)) error {
+// Operations are run sequentially. No manual locking is required inside operation. Operation should be fast, which
+// basically means that any I/O should be avoided at all cost.
+//
+// Run ends when the entire batch has ended. It returns error when batch is aborted or processor is stopped.
+// Only LoadResource and SaveResource functions can abort the batch by returning an error. If error was reported
+// for a batch all Run calls assigned to this batch will get this error.
+func (p *Processor[Resource]) Run(key string, _operation func(Resource)) error {
 	select {
 	case <-p.stopped:
 		return ProcessorStopped
@@ -110,7 +153,7 @@ func (p *Processor[Resource]) Run(key string, op func(Resource)) error {
 
 	p.workerChannels[goRoutineNumber] <- operation[Resource]{
 		resourceKey: key,
-		run:         op,
+		run:         _operation,
 		result:      result,
 	}
 
