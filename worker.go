@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-type operation[Resource any] struct {
-	resourceKey string
-	run         func(Resource)
-	result      chan error
-}
-
 type worker[Resource any] struct {
 	goRoutineNumber    int
 	incomingOperations <-chan operation[Resource]
@@ -98,6 +92,12 @@ func (w *worker[Resource]) runOperation(_operation operation[Resource]) {
 	_batch.results = append(_batch.results, _operation.result)
 
 	_operation.run(_batch.resource)
+}
+
+type operation[Resource any] struct {
+	resourceKey string
+	run         func(Resource)
+	result      chan error
 }
 
 type batch[Resource any] struct {
