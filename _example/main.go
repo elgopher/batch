@@ -23,6 +23,7 @@ func main() {
 			SaveResource: db.SaveTrain,
 		},
 	)
+	defer processor.Stop()
 
 	trainService := train.Service{
 		BatchProcessor: processor,

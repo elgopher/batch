@@ -15,12 +15,12 @@ type operation[Resource any] struct {
 }
 
 type worker[Resource any] struct {
-	goRoutineNumber int
-	operations      chan operation[Resource]
-	loadResource    func(context.Context, string) (Resource, error)
-	saveResource    func(context.Context, string, Resource) error
-	minDuration     time.Duration
-	maxDuration     time.Duration
+	goRoutineNumber    int
+	incomingOperations <-chan operation[Resource]
+	loadResource       func(context.Context, string) (Resource, error)
+	saveResource       func(context.Context, string, Resource) error
+	minDuration        time.Duration
+	maxDuration        time.Duration
 }
 
 func (w worker[Resource]) run() {
@@ -34,50 +34,50 @@ func (w worker[Resource]) run() {
 		select {
 		case <-ticker.C:
 			now := time.Now()
-			for _, b := range batchByDeadline {
-				if b.deadline.Before(now) {
-					err := w.saveResource(b.ctx, b.key, b.resource)
-					b.publishResult(err)
-					delete(batchByResourceKey, b.key)
+			for _, _batch := range batchByDeadline {
+				if _batch.deadline.Before(now) {
+					err := w.saveResource(_batch.ctx, _batch.key, _batch.resource)
+					_batch.publishResult(err)
+					delete(batchByResourceKey, _batch.key)
 					batchByDeadline = batchByDeadline[1:]
 					continue
 				}
 			}
-		case op, ok := <-w.operations:
+		case _operation, ok := <-w.incomingOperations:
 			if !ok {
-				for key, b := range batchByResourceKey {
-					err := w.saveResource(b.ctx, key, b.resource)
-					b.publishResult(err)
+				for key, _batch := range batchByResourceKey {
+					err := w.saveResource(_batch.ctx, key, _batch.resource)
+					_batch.publishResult(err)
 					continue
 				}
 				return
 			}
 
-			b, found := batchByResourceKey[op.resourceKey]
+			_batch, found := batchByResourceKey[_operation.resourceKey]
 			if !found {
 				ctx, cancel := context.WithTimeout(context.Background(), w.maxDuration)
 				defer cancel()
 
 				now := time.Now()
 
-				resource, err := w.loadResource(ctx, op.resourceKey)
+				resource, err := w.loadResource(ctx, _operation.resourceKey)
 				if err != nil {
-					op.result <- err
+					_operation.result <- err
 					continue
 				}
-				b = &batch[Resource]{
+				_batch = &batch[Resource]{
 					ctx:      ctx,
-					key:      op.resourceKey,
+					key:      _operation.resourceKey,
 					resource: resource,
 					deadline: now.Add(w.minDuration),
 				}
-				batchByResourceKey[op.resourceKey] = b
-				batchByDeadline = append(batchByDeadline, b)
+				batchByResourceKey[_operation.resourceKey] = _batch
+				batchByDeadline = append(batchByDeadline, _batch)
 			}
 
-			b.results = append(b.results, op.result)
+			_batch.results = append(_batch.results, _operation.result)
 
-			op.run(b.resource)
+			_operation.run(_batch.resource)
 		}
 	}
 }

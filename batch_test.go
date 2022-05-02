@@ -23,6 +23,7 @@ func TestProcessor_Run(t *testing.T) {
 		futureValue := FutureValue[*resource]()
 
 		processor := batch.StartProcessor(batch.Options[*resource]{})
+		defer processor.Stop()
 		// when
 		err := processor.Run("key", func(c *resource) {
 			futureValue.Set(c)
@@ -44,6 +45,7 @@ func TestProcessor_Run(t *testing.T) {
 					return res, nil
 				},
 			})
+		defer processor.Stop()
 		// when
 		err := processor.Run(key, func(r *resource) {
 			futureValue.Set(r)
@@ -64,6 +66,7 @@ func TestProcessor_Run(t *testing.T) {
 				LoadResource: db.Load,
 				SaveResource: db.Save,
 			})
+		defer processor.Stop()
 		// when
 		err := processor.Run(key, func(r *resource) {
 			r.value = 2
@@ -83,6 +86,7 @@ func TestProcessor_Run(t *testing.T) {
 				MinDuration: 100 * time.Millisecond,
 			},
 		)
+		defer processor.Stop()
 
 		started := time.Now()
 		// when
@@ -95,6 +99,7 @@ func TestProcessor_Run(t *testing.T) {
 
 	t.Run("should run batch with default min duration", func(t *testing.T) {
 		processor := batch.StartProcessor(batch.Options[empty]{})
+		defer processor.Stop()
 
 		started := time.Now()
 		// when
@@ -117,6 +122,7 @@ func TestProcessor_Run(t *testing.T) {
 					return nil
 				},
 			})
+		defer processor.Stop()
 
 		key := ""
 
@@ -146,6 +152,7 @@ func TestProcessor_Run(t *testing.T) {
 					SaveResource: db.Save,
 				},
 			)
+			defer processor.Stop()
 			// when
 			err := processor.Run(key, func(*resource) {})
 			// then
@@ -172,6 +179,7 @@ func TestProcessor_Run(t *testing.T) {
 					SaveResource: db.Save,
 				},
 			)
+			defer processor.Stop()
 			// when
 			err := processor.Run(key, func(*resource) {})
 			// then
@@ -196,6 +204,7 @@ func TestProcessor_Run(t *testing.T) {
 					},
 				},
 			)
+			defer processor.Stop()
 			// when
 			err := processor.Run(key, func(empty) {})
 			// then
@@ -211,6 +220,7 @@ func TestProcessor_Run(t *testing.T) {
 				},
 			},
 		)
+		defer processor.Stop()
 
 		const iterations = 1000
 
@@ -272,6 +282,34 @@ func TestProcessor_Stop(t *testing.T) {
 		batchFinished.Wait()
 		elapsed := time.Now().Sub(started)
 		assert.True(t, elapsed < minDuration, "stopped batch should take less time than batch min duration")
+	})
+
+	t.Run("Stop should wait until all batches are finished", func(t *testing.T) {
+		var operationExecuted sync.WaitGroup
+		operationExecuted.Add(1)
+
+		batchFinished := false
+		processor := batch.StartProcessor(
+			batch.Options[empty]{
+				MinDuration: time.Second,
+				MaxDuration: time.Second,
+				SaveResource: func(ctx context.Context, key string, _ empty) error {
+					<-ctx.Done()
+					batchFinished = true
+					return nil
+				},
+			},
+		)
+		go func() {
+			_ = processor.Run("key", func(empty) {
+				operationExecuted.Done()
+			})
+		}()
+		operationExecuted.Wait()
+		// when
+		processor.Stop()
+		// then
+		assert.True(t, batchFinished)
 	})
 }
 

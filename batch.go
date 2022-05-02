@@ -6,6 +6,7 @@ package batch
 import (
 	"context"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -21,31 +22,41 @@ type Options[Resource any] struct {
 func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource] {
 	options = options.withDefaults()
 
-	operations := make([]chan operation[Resource], options.GoRoutines)
+	workerChannels := make([]chan operation[Resource], options.GoRoutines)
+
+	var workersFinished sync.WaitGroup
+	workersFinished.Add(options.GoRoutines)
+
 	for i := 0; i < options.GoRoutines; i++ {
-		operations[i] = make(chan operation[Resource])
-		w := worker[Resource]{
-			goRoutineNumber: i,
-			operations:      operations[i],
-			loadResource:    options.LoadResource,
-			saveResource:    options.SaveResource,
-			minDuration:     options.MinDuration,
-			maxDuration:     options.MaxDuration,
+		workerChannels[i] = make(chan operation[Resource])
+		_worker := worker[Resource]{
+			goRoutineNumber:    i,
+			incomingOperations: workerChannels[i],
+			loadResource:       options.LoadResource,
+			saveResource:       options.SaveResource,
+			minDuration:        options.MinDuration,
+			maxDuration:        options.MaxDuration,
 		}
-		go w.run()
+
+		go func() {
+			_worker.run()
+			workersFinished.Done()
+		}()
 	}
 
 	return &Processor[Resource]{
-		options:    options,
-		stopped:    make(chan struct{}),
-		operations: operations,
+		options:         options,
+		stopped:         make(chan struct{}),
+		workerChannels:  workerChannels,
+		workersFinished: &workersFinished,
 	}
 }
 
 type Processor[Resource any] struct {
-	options    Options[Resource]
-	stopped    chan struct{}
-	operations []chan operation[Resource]
+	options         Options[Resource]
+	stopped         chan struct{}
+	workerChannels  []chan operation[Resource]
+	workersFinished *sync.WaitGroup
 }
 
 func (s Options[Resource]) withDefaults() Options[Resource] {
@@ -97,7 +108,7 @@ func (p *Processor[Resource]) Run(key string, op func(Resource)) error {
 
 	goRoutineNumber := p.options.GoRoutineNumberForKey(key, p.options.GoRoutines)
 
-	p.operations[goRoutineNumber] <- operation[Resource]{
+	p.workerChannels[goRoutineNumber] <- operation[Resource]{
 		resourceKey: key,
 		run:         op,
 		result:      result,
@@ -107,9 +118,13 @@ func (p *Processor[Resource]) Run(key string, op func(Resource)) error {
 }
 
 // Stop ends all running batches. No new operations will be accepted.
+// Stop blocks until all pending batches are ended and resources saved.
 func (p *Processor[Resource]) Stop() {
 	close(p.stopped)
-	for _, op := range p.operations {
-		close(op)
+
+	for _, channel := range p.workerChannels {
+		close(channel)
 	}
+
+	p.workersFinished.Wait()
 }
