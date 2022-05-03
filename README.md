@@ -60,8 +60,8 @@ processor := batch.StartProcessor(
 )
 
 // And use the processor inside http/grpc handler or technology-agnostic service.
-// ResourceKey can be taken from request parameter.
-err := processor.Run(resourceKey, func(r *YourResource) {
+// ctx is a standard context.Context and resourceKey can be taken from request parameter
+err := processor.Run(ctx, resourceKey, func(r *YourResource) {
     // Here you put the code which will executed sequentially inside batch  
 })
 ```

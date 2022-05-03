@@ -18,6 +18,8 @@ import (
 	"github.com/elgopher/batch"
 )
 
+var noTimeout = context.Background()
+
 func TestProcessor_Run(t *testing.T) {
 	t.Run("should run callback on zero-value resource when LoadResource was not provided", func(t *testing.T) {
 		futureValue := FutureValue[*resource]()
@@ -25,7 +27,7 @@ func TestProcessor_Run(t *testing.T) {
 		processor := batch.StartProcessor(batch.Options[*resource]{})
 		defer processor.Stop()
 		// when
-		err := processor.Run("key", func(c *resource) {
+		err := processor.Run(noTimeout, "key", func(c *resource) {
 			futureValue.Set(c)
 		})
 		require.NoError(t, err)
@@ -47,7 +49,7 @@ func TestProcessor_Run(t *testing.T) {
 			})
 		defer processor.Stop()
 		// when
-		err := processor.Run(key, func(r *resource) {
+		err := processor.Run(noTimeout, key, func(r *resource) {
 			futureValue.Set(r)
 		})
 		require.NoError(t, err)
@@ -68,7 +70,7 @@ func TestProcessor_Run(t *testing.T) {
 			})
 		defer processor.Stop()
 		// when
-		err := processor.Run(key, func(r *resource) {
+		err := processor.Run(noTimeout, key, func(r *resource) {
 			r.value = 2
 		})
 		require.NoError(t, err)
@@ -90,7 +92,7 @@ func TestProcessor_Run(t *testing.T) {
 
 		started := time.Now()
 		// when
-		err := processor.Run("", func(empty) {})
+		err := processor.Run(noTimeout, "", func(empty) {})
 		require.NoError(t, err)
 
 		elapsed := time.Now().Sub(started)
@@ -103,7 +105,7 @@ func TestProcessor_Run(t *testing.T) {
 
 		started := time.Now()
 		// when
-		err := processor.Run("", func(empty) {})
+		err := processor.Run(noTimeout, "", func(empty) {})
 		require.NoError(t, err)
 
 		elapsed := time.Now().Sub(started)
@@ -126,12 +128,12 @@ func TestProcessor_Run(t *testing.T) {
 
 		key := ""
 
-		err := processor.Run(key, func(empty) {
+		err := processor.Run(noTimeout, key, func(empty) {
 			time.Sleep(100 * time.Millisecond)
 		})
 		require.NoError(t, err)
 
-		err = processor.Run(key, func(empty) {})
+		err = processor.Run(noTimeout, key, func(empty) {})
 		require.NoError(t, err)
 
 		assert.Equal(t, int32(2), atomic.LoadInt32(&batchCount))
@@ -154,7 +156,7 @@ func TestProcessor_Run(t *testing.T) {
 			)
 			defer processor.Stop()
 			// when
-			err := processor.Run(key, func(*resource) {})
+			err := processor.Run(noTimeout, key, func(*resource) {})
 			// then
 			assert.ErrorIs(t, err, customError)
 			// and
@@ -181,7 +183,7 @@ func TestProcessor_Run(t *testing.T) {
 			)
 			defer processor.Stop()
 			// when
-			err := processor.Run(key, func(*resource) {})
+			err := processor.Run(noTimeout, key, func(*resource) {})
 			// then
 			assert.ErrorIs(t, err, timeoutError)
 			// and
@@ -206,7 +208,7 @@ func TestProcessor_Run(t *testing.T) {
 			)
 			defer processor.Stop()
 			// when
-			err := processor.Run(key, func(empty) {})
+			err := processor.Run(noTimeout, key, func(empty) {})
 			// then
 			assert.ErrorIs(t, err, timeoutError)
 		})
@@ -229,7 +231,7 @@ func TestProcessor_Run(t *testing.T) {
 
 		for i := 0; i < iterations; i++ {
 			go func() {
-				err := processor.Run("key", func(r *resource) {
+				err := processor.Run(noTimeout, "key", func(r *resource) {
 					r.value++ // value is not guarded so data race should be reported by `go test`
 				})
 				require.NoError(t, err)
@@ -240,6 +242,35 @@ func TestProcessor_Run(t *testing.T) {
 
 		group.Wait()
 	})
+
+	t.Run("should cancel operation if operation is still waiting to be run", func(t *testing.T) {
+		processor := batch.StartProcessor(batch.Options[empty]{})
+		defer processor.Stop()
+
+		var slowOperationStarted sync.WaitGroup
+		slowOperationStarted.Add(1)
+
+		var slowOperationStopped sync.WaitGroup
+		slowOperationStopped.Add(1)
+
+		key := "key"
+
+		go processor.Run(noTimeout, key, func(empty) {
+			slowOperationStarted.Done()
+			slowOperationStopped.Wait()
+		})
+
+		slowOperationStarted.Wait()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		// when
+		cancel()
+		err := processor.Run(ctx, key, func(empty) {})
+		// then
+		assert.ErrorIs(t, err, batch.OperationCancelled)
+		// cleanup
+		slowOperationStopped.Done()
+	})
 }
 
 func TestProcessor_Stop(t *testing.T) {
@@ -247,7 +278,7 @@ func TestProcessor_Stop(t *testing.T) {
 		processor := batch.StartProcessor(batch.Options[empty]{})
 		processor.Stop()
 
-		err := processor.Run("key", func(empty) {})
+		err := processor.Run(noTimeout, "key", func(empty) {})
 		assert.ErrorIs(t, err, batch.ProcessorStopped)
 	})
 
@@ -269,7 +300,7 @@ func TestProcessor_Stop(t *testing.T) {
 		started := time.Now()
 
 		go func() {
-			err := processor.Run("key", func(empty) {
+			err := processor.Run(noTimeout, "key", func(empty) {
 				operationExecuted.Done()
 			})
 			require.NoError(t, err)
@@ -301,7 +332,7 @@ func TestProcessor_Stop(t *testing.T) {
 			},
 		)
 		go func() {
-			_ = processor.Run("key", func(empty) {
+			_ = processor.Run(noTimeout, "key", func(empty) {
 				operationExecuted.Done()
 			})
 		}()

@@ -32,7 +32,7 @@ type Options[Resource any] struct {
 	// SaveResource saves resource with given key to a database. Returning an error aborts the batch.
 	// This function is called at the end of each batch. Context passed as a first parameter
 	// has a timeout calculated using batch MaxDuration. You can use this information to abort saving resource
-	// if it takes too long.
+	// if it takes too long (thus aborting the entire batch).
 	//
 	// By default, does nothing.
 	SaveResource func(_ context.Context, key string, _ Resource) error
@@ -139,7 +139,10 @@ func (s Options[Resource]) withDefaults() Options[Resource] {
 // Run ends when the entire batch has ended. It returns error when batch is aborted or processor is stopped.
 // Only LoadResource and SaveResource functions can abort the batch by returning an error. If error was reported
 // for a batch all Run calls assigned to this batch will get this error.
-func (p *Processor[Resource]) Run(key string, _operation func(Resource)) error {
+//
+// Operation which is still waiting to be run can be canceled by cancelling ctx. If operation was executed but batch
+// is pending then Run waits until batch ends. When ctx is cancelled then OperationCancelled error is returned.
+func (p *Processor[Resource]) Run(ctx context.Context, key string, _operation func(Resource)) error {
 	select {
 	case <-p.stopped:
 		return ProcessorStopped
@@ -151,13 +154,18 @@ func (p *Processor[Resource]) Run(key string, _operation func(Resource)) error {
 
 	goRoutineNumber := p.options.GoRoutineNumberForKey(key, p.options.GoRoutines)
 
-	p.workerChannels[goRoutineNumber] <- operation[Resource]{
+	o := operation[Resource]{
 		resourceKey: key,
 		run:         _operation,
 		result:      result,
 	}
 
-	return <-result
+	select {
+	case p.workerChannels[goRoutineNumber] <- o:
+		return <-result
+	case <-ctx.Done():
+		return OperationCancelled
+	}
 }
 
 // Stop ends all running batches. No new operations will be accepted.

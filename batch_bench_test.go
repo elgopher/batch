@@ -1,6 +1,7 @@
 package batch_test
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"testing"
@@ -31,7 +32,7 @@ func BenchmarkProcessor_Run(b *testing.B) {
 				key := strconv.Itoa(i % resourceCount)
 				go func() {
 					// when
-					err := processor.Run(key, operation)
+					err := processor.Run(context.Background(), key, operation)
 					require.NoError(b, err)
 					allOperationsFinished.Done()
 				}()
