@@ -3,6 +3,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/elgopher/batch)](https://goreportcard.com/report/github.com/elgopher/batch)
 [![codecov](https://codecov.io/gh/elgopher/batch/branch/master/graph/badge.svg)](https://codecov.io/gh/elgopher/batch)
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
+<img src="logo.svg" align="right" width="140px">
 
 ## What it can be used for?
 
