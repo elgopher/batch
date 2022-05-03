@@ -49,25 +49,23 @@ func (w *worker[Resource]) endBatchesAfterDeadline() {
 			return
 		}
 
-		ctx, cancel := context.WithDeadline(context.Background(), _batch.deadline)
+		w.endBatch(_batch)
 
-		err := w.saveResource(ctx, _batch.key, _batch.resource)
-		_batch.publishResult(err)
-		delete(w.batchByResourceKey, _batch.key)
+		delete(w.batchByResourceKey, _batch.resourceKey)
 		w.batchByDeadline = w.batchByDeadline[1:]
-
-		cancel()
 	}
 }
 
+func (w *worker[Resource]) endBatch(_batch *batch[Resource]) {
+	ctx, cancel := context.WithDeadline(context.Background(), _batch.deadline)
+	err := w.saveResource(ctx, _batch.resourceKey, _batch.resource)
+	_batch.publishResult(err)
+	cancel()
+}
+
 func (w *worker[Resource]) endAllBatches() {
-	for key, _batch := range w.batchByResourceKey {
-		ctx, cancel := context.WithDeadline(context.Background(), _batch.deadline)
-
-		err := w.saveResource(ctx, key, _batch.resource)
-		_batch.publishResult(err)
-
-		cancel()
+	for _, _batch := range w.batchByDeadline {
+		w.endBatch(_batch)
 	}
 
 	w.batchByResourceKey = map[string]*batch[Resource]{}
@@ -77,31 +75,43 @@ func (w *worker[Resource]) endAllBatches() {
 func (w *worker[Resource]) runOperation(_operation operation[Resource]) {
 	_batch, found := w.batchByResourceKey[_operation.resourceKey]
 	if !found {
-		now := time.Now()
-		deadline := now.Add(w.minDuration)
-
-		ctx, cancel := context.WithDeadline(context.Background(), deadline)
-		defer cancel()
-
-		resource, err := w.loadResource(ctx, _operation.resourceKey)
+		var err error
+		_batch, err = w.newBatch(_operation.resourceKey)
 		if err != nil {
 			_operation.result <- err
 			return
 		}
 
-		_batch = &batch[Resource]{
-			key:      _operation.resourceKey,
-			resource: resource,
-			deadline: deadline,
-		}
-
-		w.batchByResourceKey[_operation.resourceKey] = _batch
-		w.batchByDeadline = append(w.batchByDeadline, _batch)
+		w.addBatch(_batch)
 	}
 
-	_batch.results = append(_batch.results, _operation.result)
+	_batch.operationResults = append(_batch.operationResults, _operation.result)
 
 	_operation.run(_batch.resource)
+}
+
+func (w *worker[Resource]) newBatch(resourceKey string) (*batch[Resource], error) {
+	now := time.Now()
+	deadline := now.Add(w.minDuration)
+
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+
+	resource, err := w.loadResource(ctx, resourceKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return &batch[Resource]{
+		resourceKey: resourceKey,
+		resource:    resource,
+		deadline:    deadline,
+	}, nil
+}
+
+func (w *worker[Resource]) addBatch(b *batch[Resource]) {
+	w.batchByResourceKey[b.resourceKey] = b
+	w.batchByDeadline = append(w.batchByDeadline, b)
 }
 
 type operation[Resource any] struct {
@@ -111,14 +121,14 @@ type operation[Resource any] struct {
 }
 
 type batch[Resource any] struct {
-	key      string
-	resource Resource
-	results  []chan error
-	deadline time.Time
+	resourceKey      string
+	resource         Resource
+	operationResults []chan error
+	deadline         time.Time
 }
 
 func (b *batch[Resource]) publishResult(result error) {
-	for _, c := range b.results {
-		c <- result
+	for _, r := range b.operationResults {
+		r <- result
 	}
 }
