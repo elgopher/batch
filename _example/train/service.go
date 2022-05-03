@@ -3,19 +3,21 @@
 
 package train
 
+import "context"
+
 // BatchProcessor is an optional interface to decouple your code from `batch` package.
 type BatchProcessor interface {
-	Run(key string, operation func(*Train)) error
+	Run(ctx context.Context, key string, operation func(*Train)) error
 }
 
 type Service struct {
 	BatchProcessor BatchProcessor
 }
 
-func (s Service) Book(trainName string, seatNumber int, person string) error {
+func (s Service) Book(ctx context.Context, trainName string, seatNumber int, person string) error {
 	var operationError error
 
-	batchError := s.BatchProcessor.Run(trainName, func(train *Train) {
+	batchError := s.BatchProcessor.Run(ctx, trainName, func(train *Train) {
 		operationError = train.Book(seatNumber, person)
 	})
 

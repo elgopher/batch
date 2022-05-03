@@ -6,3 +6,4 @@ package batch
 import "errors"
 
 var ProcessorStopped = errors.New("run failed: processor is stopped")
+var OperationCancelled = errors.New("run failed: operation was canceled before it was run")

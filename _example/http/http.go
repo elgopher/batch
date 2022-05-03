@@ -4,6 +4,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,7 +14,7 @@ import (
 )
 
 type TrainService interface {
-	Book(train string, seatNumber int, person string) error
+	Book(ctx context.Context, train string, seatNumber int, person string) error
 }
 
 func ListenAndServe(trainService TrainService) error {
@@ -41,7 +42,7 @@ func bookHandler(trainService TrainService) func(http.ResponseWriter, *http.Requ
 			return
 		}
 
-		err = trainService.Book(trainKey, seat, person)
+		err = trainService.Book(request.Context(), trainKey, seat, person)
 
 		if errors.Is(err, train.ErrValidation("")) {
 			writer.WriteHeader(http.StatusBadRequest)
@@ -51,7 +52,7 @@ func bookHandler(trainService TrainService) func(http.ResponseWriter, *http.Requ
 
 		if err != nil {
 			writer.WriteHeader(http.StatusInternalServerError)
-			fmt.Println("internal server error", err)
+			fmt.Println("internal server error:", err)
 			return
 		}
 
