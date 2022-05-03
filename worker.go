@@ -69,9 +69,10 @@ func (w *worker[Resource]) endAllBatches() {
 func (w *worker[Resource]) runOperation(_operation operation[Resource]) {
 	_batch, found := w.batchByResourceKey[_operation.resourceKey]
 	if !found {
-		ctx, _ := context.WithTimeout(context.Background(), w.maxDuration)
-
 		now := time.Now()
+		deadline := now.Add(w.minDuration)
+
+		ctx, _ := context.WithDeadline(context.Background(), deadline)
 
 		resource, err := w.loadResource(ctx, _operation.resourceKey)
 		if err != nil {
@@ -83,7 +84,7 @@ func (w *worker[Resource]) runOperation(_operation operation[Resource]) {
 			ctx:      ctx,
 			key:      _operation.resourceKey,
 			resource: resource,
-			deadline: now.Add(w.minDuration),
+			deadline: deadline,
 		}
 		w.batchByResourceKey[_operation.resourceKey] = _batch
 		w.batchByDeadline = append(w.batchByDeadline, _batch)
