@@ -6,10 +6,10 @@
 
 ## What it can be used for?
 
-To speed up application performance **without** sacrificing *data consistency* or *data durability* or making source code/architecture complex.
+To speed up application performance **without** sacrificing *data consistency* and *data durability* or making source code/architecture complex.
 
 The **batch** package simplifies writing Go applications that process incoming requests (HTTP, GRPC etc.) in a batch manner:
-instead of processing each request separately, group incoming requests to a batch and run whole group at once.
+instead of processing each request separately, they group incoming requests to a batch and run whole group at once.
 This method of processing can significantly speed up the application and reduce the consumption of disk, network or CPU.
 
 The **batch** package can be used to write any type of *servers* that handle thousands of requests per second. 
