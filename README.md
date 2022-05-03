@@ -61,7 +61,7 @@ processor := batch.StartProcessor(
 
 // And use the processor inside http/grpc handler or technology-agnostic service.
 // ResourceKey can be taken from request parameter.
-err := s.BatchProcessor.Run(resourceKey, func(r *YourResource) {
+err := processor.Run(resourceKey, func(r *YourResource) {
     // Here you put the code which will executed sequentially inside batch  
 })
 ```
