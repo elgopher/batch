@@ -5,7 +5,6 @@ package batch
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -36,19 +35,6 @@ type Options[Resource any] struct {
 	//
 	// By default, does nothing.
 	SaveResource func(_ context.Context, key string, _ Resource) error
-	// GoRoutines specifies how many goroutines should be used to run batch operations.
-	//
-	// By default, 16 * number of CPUs.
-	GoRoutines int
-	// GoRoutineNumberForKey returns go-routine number which will be used to run operation on
-	// a given resource key. This function is crucial to properly serialize requests.
-	//
-	// This function must be deterministic - it should always return the same go-routine number
-	// for given combination of key and goroutines parameters.
-	//
-	// By default, GoroutineNumberForKey function is used. This implementation calculates hash
-	// on a given key and use modulo to calculate go-routine number.
-	GoRoutineNumberForKey func(key string, goroutines int) int
 }
 
 // StartProcessor starts batch processor which will run operations in batches.
@@ -58,42 +44,20 @@ type Options[Resource any] struct {
 func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource] {
 	options = options.withDefaults()
 
-	workerChannels := make([]chan operation[Resource], options.GoRoutines)
-
-	var workersFinished sync.WaitGroup
-	workersFinished.Add(options.GoRoutines)
-
-	for i := 0; i < options.GoRoutines; i++ {
-		workerChannels[i] = make(chan operation[Resource])
-		_worker := worker[Resource]{
-			goRoutineNumber:    i,
-			incomingOperations: workerChannels[i],
-			loadResource:       options.LoadResource,
-			saveResource:       options.SaveResource,
-			minDuration:        options.MinDuration,
-			maxDuration:        options.MaxDuration,
-		}
-
-		go func() {
-			_worker.run()
-			workersFinished.Done()
-		}()
-	}
-
 	return &Processor[Resource]{
-		options:         options,
-		stopped:         make(chan struct{}),
-		workerChannels:  workerChannels,
-		workersFinished: &workersFinished,
+		options:       options,
+		stopped:       make(chan struct{}),
+		batchChannels: map[string]chan operation[Resource]{},
 	}
 }
 
 // Processor represents instance of batch processor which can be used to issue operations which run in a batch manner.
 type Processor[Resource any] struct {
-	options         Options[Resource]
-	stopped         chan struct{}
-	workerChannels  []chan operation[Resource]
-	workersFinished *sync.WaitGroup
+	options            Options[Resource]
+	stopped            chan struct{}
+	allBatchesFinished sync.WaitGroup
+	mutex              sync.Mutex
+	batchChannels      map[string]chan operation[Resource]
 }
 
 func (s Options[Resource]) withDefaults() Options[Resource] {
@@ -116,14 +80,6 @@ func (s Options[Resource]) withDefaults() Options[Resource] {
 
 	if s.MaxDuration == 0 {
 		s.MaxDuration = 2 * s.MinDuration
-	}
-
-	if s.GoRoutines == 0 {
-		s.GoRoutines = 16 * runtime.NumCPU()
-	}
-
-	if s.GoRoutineNumberForKey == nil {
-		s.GoRoutineNumberForKey = GoroutineNumberForKey
 	}
 
 	return s
@@ -152,20 +108,64 @@ func (p *Processor[Resource]) Run(ctx context.Context, key string, _operation fu
 	result := make(chan error)
 	defer close(result)
 
-	goRoutineNumber := p.options.GoRoutineNumberForKey(key, p.options.GoRoutines)
-
-	o := operation[Resource]{
-		resourceKey: key,
-		run:         _operation,
-		result:      result,
+	operationMessage := operation[Resource]{
+		run:    _operation,
+		result: result,
 	}
 
-	select {
-	case p.workerChannels[goRoutineNumber] <- o:
-		return <-result
-	case <-ctx.Done():
-		return OperationCancelled
+	for {
+		incomingOperations := p.temporaryBatchChannel(key)
+
+		select {
+		case <-ctx.Done():
+			return OperationCancelled
+
+		case incomingOperations <- operationMessage:
+			return <-result
+
+		case <-time.After(10 * time.Millisecond):
+			// Timeout waiting to push operation. Possibly batch goroutine was stopped.
+		}
 	}
+
+}
+
+func (p *Processor[Resource]) temporaryBatchChannel(key string) chan<- operation[Resource] {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	batchChannel, ok := p.batchChannels[key]
+	if !ok {
+		batchChannel = make(chan operation[Resource])
+		p.batchChannels[key] = batchChannel
+
+		go p.startBatch(key, batchChannel)
+	}
+
+	return batchChannel
+}
+
+func (p *Processor[Resource]) startBatch(key string, batchChannel chan operation[Resource]) {
+	p.allBatchesFinished.Add(1)
+	defer p.allBatchesFinished.Done()
+
+	now := time.Now()
+
+	w := &batch[Resource]{
+		Options:            p.options,
+		resourceKey:        key,
+		incomingOperations: batchChannel,
+		stopped:            p.stopped,
+		softDeadline:       now.Add(p.options.MinDuration),
+		hardDeadline:       now.Add(p.options.MaxDuration),
+	}
+	w.process()
+
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	// Delete the channel even though it is still used by pending Run calls.
+	// Those calls should time out and retry on a new channel.
+	delete(p.batchChannels, key)
 }
 
 // Stop ends all running batches. No new operations will be accepted.
@@ -173,9 +173,5 @@ func (p *Processor[Resource]) Run(ctx context.Context, key string, _operation fu
 func (p *Processor[Resource]) Stop() {
 	close(p.stopped)
 
-	for _, channel := range p.workerChannels {
-		close(channel)
-	}
-
-	p.workersFinished.Wait()
+	p.allBatchesFinished.Wait()
 }
