@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/elgopher/batch"
 	"github.com/elgopher/batch/_example/train"
 )
 
@@ -50,12 +51,16 @@ func bookHandler(trainService TrainService) func(http.ResponseWriter, *http.Requ
 			return
 		}
 
+		if errors.Is(err, batch.OperationCancelled) {
+			// context.Context was cancelled, so the operation
+			// this could happen when connection was closed or request was cancelled (http/2)
+			return
+		}
+
 		if err != nil {
 			writer.WriteHeader(http.StatusInternalServerError)
 			fmt.Println("internal server error:", err)
 			return
 		}
-
-		writer.WriteHeader(http.StatusOK)
 	}
 }
