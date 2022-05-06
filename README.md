@@ -7,7 +7,7 @@
 
 ## What it can be used for?
 
-To speed up application performance **without** sacrificing *data consistency* and *data durability* or making source code/architecture complex.
+To increase application throughput **without sacrificing *data consistency* and *data durability***  or making source code and architecture complex.
 
 The **batch** package simplifies writing Go applications that process incoming requests (HTTP, GRPC etc.) in a batch manner:
 instead of processing each request separately, they group incoming requests to a batch and run whole group at once.
@@ -23,7 +23,7 @@ Normally a web application is using following pattern to modify data in the data
 1. **Load resource** from database. Resource is some portion of data 
 such as set of records from relational database, document from Document-oriented database or value from KV store.
 Lock the entire resource pessimistically or optimistically (by reading version number).
-2. **Apply change** to data
+2. **Apply change** to data in plain Go
 3. **Save resource** to database. Release the pessimistic lock. Or run
 atomic update with version check (optimistic lock).
 
