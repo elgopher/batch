@@ -27,11 +27,12 @@ Lock the entire resource pessimistically or optimistically (by reading version n
 3. **Save resource** to database. Release the pessimistic lock. Or run
 atomic update with version check (optimistic lock).
 
-But such architecture does not scale well if number of requests 
+But such architecture does not scale well if the number of requests 
 for a single resource is very high
 (meaning hundreds or thousands of requests per second). 
 The lock contention in such case is very high and database is significantly 
-overloaded. Practically, the number of concurrent requests is limited.  
+overloaded. Also, round-trips between application server and database add latency.
+Practically, the number of concurrent requests is severely limited.  
 
 One solution to this problem is to reduce the number of costly operations.
 Because a single resource is loaded and saved thousands of times per second 
