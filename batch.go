@@ -92,6 +92,13 @@ func (s Options[Resource]) withDefaults() Options[Resource] {
 // Operations are run sequentially. No manual locking is required inside operation. Operation should be fast, which
 // basically means that any I/O should be avoided at all cost.
 //
+// Operation must leave Resource in a consistent state, so the next operation in batch can be executed on the same resource.
+// When operation cannot be executed because some conditions are not met then operation should not change the state
+// of resource at all. This could be achieved easily by dividing operation into two sections:
+//
+//  - first section validates if operation is possible and returns error if not
+//  - second section change the Resource state
+//
 // Run ends when the entire batch has ended. It returns error when batch is aborted or processor is stopped.
 // Only LoadResource and SaveResource functions can abort the batch by returning an error. If error was reported
 // for a batch all Run calls assigned to this batch will get this error.
