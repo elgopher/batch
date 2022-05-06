@@ -88,7 +88,8 @@ For both cases you need to deploy **multiple servers** and put a **load balancer
 Please note though, that you have to carefully configure the load balancing algorithm. 
 _Round-robin_ is not an option here, because sooner or later you will have problems with locking 
 (multiple server instances will run batches on the same resource). 
-Ideal solution is to route requests based on parameters or URL. 
-For example some http parameter could be a resource key. You can instruct load balancer
-to calculate hash on this parameter value and always route requests with this param value 
-to the same backend (of course if all backends are still available).
+Ideal solution is to route requests based on URL path or query string parameters. 
+For example some http query string parameter could have a resource key. You can instruct load balancer
+to calculate hash on this parameter and always route requests with the same key 
+to the same backend. If backend will be no longer available the load balancer should route request to a different 
+server. 
