@@ -22,16 +22,20 @@ type Options[Resource any] struct {
 	// By default, 2*MinDuration.
 	MaxDuration time.Duration
 	// LoadResource loads resource with given key from a database. Returning an error aborts the batch.
-	// This function is called in the beginning of each new batch. Context passed as a first parameter
-	// has a timeout calculated using batch MaxDuration. You can use this information to abort loading resource
-	// if it takes too long.
+	// This function is called in the beginning of each new batch.
+	//
+	// Context passed as a first parameter has a timeout calculated using batch MaxDuration.
+	// You can watch context cancellation in order to abort loading resource if it takes too long.
+	// Context is also cancelled after batch was ended.
 	//
 	// By default, returns zero-value Resource.
 	LoadResource func(_ context.Context, key string) (Resource, error)
 	// SaveResource saves resource with given key to a database. Returning an error aborts the batch.
-	// This function is called at the end of each batch. Context passed as a first parameter
-	// has a timeout calculated using batch MaxDuration. You can use this information to abort saving resource
-	// if it takes too long (thus aborting the entire batch).
+	// This function is called at the end of each batch.
+	//
+	// Context passed as a first parameter has a timeout calculated using batch MaxDuration.
+	// You can watch context cancellation in order to abort saving resource if it takes too long
+	// (thus aborting the entire batch). Context is also cancelled after batch was ended.
 	//
 	// By default, does nothing.
 	SaveResource func(_ context.Context, key string, _ Resource) error
