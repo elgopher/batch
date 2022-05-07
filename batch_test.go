@@ -271,6 +271,48 @@ func TestProcessor_Run(t *testing.T) {
 		// cleanup
 		slowOperationStopped.Done()
 	})
+
+	t.Run("should use same context for LoadResource and SaveResource", func(t *testing.T) {
+		loadResourceContext := FutureValue[context.Context]()
+		saveResourceContext := FutureValue[context.Context]()
+
+		processor := batch.StartProcessor(batch.Options[empty]{
+			LoadResource: func(ctx context.Context, key string) (empty, error) {
+				loadResourceContext.Set(ctx)
+				return empty{}, nil
+			},
+			SaveResource: func(ctx context.Context, key string, r empty) error {
+				saveResourceContext.Set(ctx)
+				return nil
+			},
+			MinDuration: time.Millisecond,
+		})
+		// when
+		_ = processor.Run(context.Background(), "key", func(empty) {})
+		// then
+		assert.Same(t, loadResourceContext.Get(t), saveResourceContext.Get(t))
+	})
+
+	t.Run("should cancel context passed to LoadResource once Run finished", func(t *testing.T) {
+		loadResourceContext := FutureValue[context.Context]()
+
+		processor := batch.StartProcessor(batch.Options[empty]{
+			LoadResource: func(ctx context.Context, key string) (empty, error) {
+				loadResourceContext.Set(ctx)
+				return empty{}, nil
+			},
+			MinDuration: time.Millisecond,
+			MaxDuration: time.Minute,
+		})
+		// when
+		_ = processor.Run(context.Background(), "key", func(empty) {})
+		// then
+		select {
+		case <-loadResourceContext.Get(t).Done():
+		case <-time.After(time.Second):
+			assert.Fail(t, "Timeout waiting for canceling the context")
+		}
+	})
 }
 
 func TestProcessor_Stop(t *testing.T) {

@@ -21,21 +21,24 @@ type batch[Resource any] struct {
 }
 
 func (b *batch[Resource]) process() {
+	hardDeadlineContext, cancel := context.WithDeadline(context.Background(), b.hardDeadline)
+	defer cancel()
+
 	softDeadlineReached := time.NewTimer(b.softDeadline.Sub(time.Now()))
 	defer softDeadlineReached.Stop()
 
 	for {
 		select {
 		case <-b.stopped:
-			b.end()
+			b.end(hardDeadlineContext)
 			return
 
 		case <-softDeadlineReached.C:
-			b.end()
+			b.end(hardDeadlineContext)
 			return
 
 		case _operation := <-b.incomingOperations:
-			err := b.load()
+			err := b.load(hardDeadlineContext)
 			if err != nil {
 				_operation.result <- err
 				return
@@ -47,21 +50,18 @@ func (b *batch[Resource]) process() {
 	}
 }
 
-func (b *batch[Resource]) end() {
+func (b *batch[Resource]) end(ctx context.Context) {
 	if b.resource == nil {
 		return
 	}
 
-	err := b.save()
+	err := b.save(ctx)
 	for _, result := range b.results {
 		result <- err
 	}
 }
 
-func (b *batch[Resource]) save() error {
-	ctx, cancel := context.WithDeadline(context.Background(), b.hardDeadline)
-	defer cancel()
-
+func (b *batch[Resource]) save(ctx context.Context) error {
 	if err := b.SaveResource(ctx, b.resourceKey, *b.resource); err != nil {
 		return err
 	}
@@ -69,13 +69,10 @@ func (b *batch[Resource]) save() error {
 	return nil
 }
 
-func (b *batch[Resource]) load() error {
+func (b *batch[Resource]) load(ctx context.Context) error {
 	if b.alreadyLoaded() {
 		return nil
 	}
-
-	ctx, cancel := context.WithDeadline(context.Background(), b.hardDeadline)
-	defer cancel()
 
 	resource, err := b.LoadResource(ctx, b.resourceKey)
 	if err != nil {
