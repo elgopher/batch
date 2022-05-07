@@ -7,7 +7,7 @@
 
 ## What it can be used for?
 
-To increase application throughput **without sacrificing *data consistency* and *data durability***  or making source code and architecture complex.
+To **increase** database-driven web application **throughput** without sacrificing *data consistency* and *data durability*  or making source code and architecture complex.
 
 The **batch** package simplifies writing Go applications that process incoming requests (HTTP, GRPC etc.) in a batch manner:
 instead of processing each request separately, they group incoming requests to a batch and run whole group at once.
