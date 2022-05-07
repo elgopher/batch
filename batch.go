@@ -99,9 +99,14 @@ func (s Options[Resource]) withDefaults() Options[Resource] {
 //  - first section validates if operation is possible and returns error if not
 //  - second section change the Resource state
 //
-// Run ends when the entire batch has ended. It returns error when batch is aborted or processor is stopped.
-// Only LoadResource and SaveResource functions can abort the batch by returning an error. If error was reported
-// for a batch all Run calls assigned to this batch will get this error.
+// Run ends when the entire batch has ended.
+//
+// Error is returned when batch is aborted or processor is stopped. Only LoadResource and SaveResource functions can abort
+// the batch by returning an error. If error was reported for a batch, all Run calls assigned to this batch will get this error.
+//
+// Please always check the returned error. Operations which query the resource get uncommitted data. If there is
+// a problem with saving changes to the database, then you could have a serious inconsistency between your db and what you've
+// just sent to the users.
 //
 // Operation which is still waiting to be run can be canceled by cancelling ctx. If operation was executed but batch
 // is pending then Run waits until batch ends. When ctx is cancelled then OperationCancelled error is returned.
