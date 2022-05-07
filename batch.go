@@ -16,11 +16,13 @@ type Options[Resource any] struct {
 	//
 	// By default, 100ms.
 	MinDuration time.Duration
+
 	// Batch will have timeout with MaxDuration. Context with this timeout will be passed to
 	// LoadResource and SaveResource functions, which can abort the batch by returning an error.
 	//
 	// By default, 2*MinDuration.
 	MaxDuration time.Duration
+
 	// LoadResource loads resource with given key from a database. Returning an error aborts the batch.
 	// This function is called in the beginning of each new batch.
 	//
@@ -30,6 +32,7 @@ type Options[Resource any] struct {
 	//
 	// By default, returns zero-value Resource.
 	LoadResource func(_ context.Context, key string) (Resource, error)
+
 	// SaveResource saves resource with given key to a database. Returning an error aborts the batch.
 	// This function is called at the end of each batch.
 	//
@@ -49,9 +52,10 @@ func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource
 	options = options.withDefaults()
 
 	return &Processor[Resource]{
-		options: options,
-		stopped: make(chan struct{}),
-		batches: map[string]temporaryBatch[Resource]{},
+		options:      options,
+		stopped:      make(chan struct{}),
+		batches:      map[string]temporaryBatch[Resource]{},
+		metricBroker: &metricBroker{},
 	}
 }
 
@@ -62,6 +66,7 @@ type Processor[Resource any] struct {
 	allBatchesFinished sync.WaitGroup
 	mutex              sync.Mutex
 	batches            map[string]temporaryBatch[Resource]
+	metricBroker       *metricBroker
 }
 
 type temporaryBatch[Resource any] struct {
@@ -182,6 +187,7 @@ func (p *Processor[Resource]) startBatch(key string, batchChannels temporaryBatc
 		hardDeadline:       now.Add(p.options.MaxDuration),
 	}
 	w.process()
+	p.metricBroker.publish(w.metric)
 
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
@@ -193,6 +199,40 @@ func (p *Processor[Resource]) startBatch(key string, batchChannels temporaryBatc
 // Stop blocks until all pending batches are ended and resources saved.
 func (p *Processor[Resource]) Stop() {
 	close(p.stopped)
-
 	p.allBatchesFinished.Wait()
+	p.metricBroker.stop()
+}
+
+// SubscribeBatchMetrics subscribes to all batch metrics. Returned channel
+// is closed after Processor was stopped. It is safe to execute
+// method multiple times. Each call will create a new separate subscription.
+//
+// As soon as subscription is created all Metric messages **must be**
+// consumed from the channel. Otherwise, Processor will block.
+// Please note that slow consumer could potentially slow down entire Processor,
+// limiting the amount of operations which can be run. The amount of batches
+// per second can reach 100k, so be ready to handle such traffic. This
+// basically means that Metric consumer should not directly do any blocking IO.
+// Instead, it should aggregate data and publish it asynchronously.
+func (p *Processor[Resource]) SubscribeBatchMetrics() <-chan Metric {
+	select {
+	case <-p.stopped:
+		closedChan := make(chan Metric)
+		close(closedChan)
+		return closedChan
+	default:
+	}
+
+	return p.metricBroker.subscribe()
+}
+
+// Metric contains measurements for one finished batch.
+type Metric struct {
+	BatchStart           time.Time
+	ResourceKey          string
+	OperationCount       int
+	LoadResourceDuration time.Duration
+	SaveResourceDuration time.Duration
+	TotalDuration        time.Duration
+	Error                error
 }

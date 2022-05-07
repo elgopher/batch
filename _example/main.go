@@ -8,6 +8,7 @@ import (
 
 	"github.com/elgopher/batch"
 	"github.com/elgopher/batch/_example/http"
+	"github.com/elgopher/batch/_example/logger"
 	"github.com/elgopher/batch/_example/store"
 	"github.com/elgopher/batch/_example/train"
 )
@@ -24,6 +25,8 @@ func main() {
 		},
 	)
 	defer processor.Stop()
+
+	go logger.LogMetrics(processor.SubscribeBatchMetrics())
 
 	trainService := train.Service{
 		BatchProcessor: processor,
