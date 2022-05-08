@@ -93,8 +93,9 @@ func (s Options[Resource]) withDefaults() Options[Resource] {
 // If there is no pending batch then the new batch will be started and will run for at least MinDuration. After the
 // MinDuration no new operations will be accepted and SaveResource function will be called.
 //
-// Operations are run sequentially. No manual locking is required inside operation. Operation should be fast, which
-// basically means that any I/O should be avoided at all cost.
+// Operations are run sequentially. No manual synchronization is required inside operation. Operation should be fast, which
+// basically means that any I/O should be avoided at all cost. Operations (together with LoadResource and SaveResource)
+// are run on a batch dedicated go-routine.
 //
 // Operation must leave Resource in a consistent state, so the next operation in batch can be executed on the same resource.
 // When operation cannot be executed because some conditions are not met then operation should not change the state
