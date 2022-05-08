@@ -20,8 +20,9 @@ Thanks to this small library, you can create relatively simple code without the 
 
 Normally a web application is using following pattern to modify data in the database:
 
-1. **Load resource** from database. Resource is some portion of data 
-such as set of records from relational database, document from Document-oriented database or value from KV store.
+1. **Load resource** from database. **Resource** is some portion of data 
+such as set of records from relational database, document from Document-oriented database or value from KV store
+(in Domain-Driven Design terms it is called an [aggregate](https://martinfowler.com/bliki/DDD_Aggregate.html)).
 Lock the entire resource pessimistically or optimistically (by reading version number).
 2. **Apply change** to data in plain Go
 3. **Save resource** to database. Release the pessimistic lock. Or run
