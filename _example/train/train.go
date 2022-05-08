@@ -40,6 +40,12 @@ func (t *Train) validateBooking(seatNumber int, person string) error {
 		return ErrValidation("empty person name")
 	}
 
+	for n, seat := range t.Seats {
+		if seat == person && seatNumber != n {
+			return ErrValidation("person already booked a different seat number in the train")
+		}
+	}
+
 	if t.Seats[seatNumber] != "" && t.Seats[seatNumber] != person {
 		return ErrValidation("seat number is already booked by another person")
 	}
