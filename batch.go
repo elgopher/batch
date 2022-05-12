@@ -49,9 +49,9 @@ func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource
 	options = options.withDefaults()
 
 	return &Processor[Resource]{
-		options:       options,
-		stopped:       make(chan struct{}),
-		batchChannels: map[string]chan operation[Resource]{},
+		options: options,
+		stopped: make(chan struct{}),
+		batches: map[string]temporaryBatch[Resource]{},
 	}
 }
 
@@ -61,7 +61,12 @@ type Processor[Resource any] struct {
 	stopped            chan struct{}
 	allBatchesFinished sync.WaitGroup
 	mutex              sync.Mutex
-	batchChannels      map[string]chan operation[Resource]
+	batches            map[string]temporaryBatch[Resource]
+}
+
+type temporaryBatch[Resource any] struct {
+	incomingOperations chan operation[Resource]
+	closed             chan struct{}
 }
 
 func (s Options[Resource]) withDefaults() Options[Resource] {
@@ -131,30 +136,30 @@ func (p *Processor[Resource]) Run(ctx context.Context, key string, _operation fu
 	}
 
 	for {
-		incomingOperations := p.temporaryBatchChannel(key)
+		tempBatch := p.temporaryBatch(key)
 
 		select {
 		case <-ctx.Done():
 			return OperationCancelled
 
-		case incomingOperations <- operationMessage:
+		case tempBatch.incomingOperations <- operationMessage:
 			return <-result
 
-		case <-time.After(10 * time.Millisecond):
-			// Timeout waiting to push operation. Possibly batch goroutine was stopped.
+		case <-tempBatch.closed:
 		}
 	}
 
 }
 
-func (p *Processor[Resource]) temporaryBatchChannel(key string) chan<- operation[Resource] {
+func (p *Processor[Resource]) temporaryBatch(key string) temporaryBatch[Resource] {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
-	batchChannel, ok := p.batchChannels[key]
+	batchChannel, ok := p.batches[key]
 	if !ok {
-		batchChannel = make(chan operation[Resource])
-		p.batchChannels[key] = batchChannel
+		batchChannel.incomingOperations = make(chan operation[Resource])
+		batchChannel.closed = make(chan struct{})
+		p.batches[key] = batchChannel
 
 		go p.startBatch(key, batchChannel)
 	}
@@ -162,7 +167,7 @@ func (p *Processor[Resource]) temporaryBatchChannel(key string) chan<- operation
 	return batchChannel
 }
 
-func (p *Processor[Resource]) startBatch(key string, batchChannel chan operation[Resource]) {
+func (p *Processor[Resource]) startBatch(key string, batchChannels temporaryBatch[Resource]) {
 	p.allBatchesFinished.Add(1)
 	defer p.allBatchesFinished.Done()
 
@@ -171,7 +176,7 @@ func (p *Processor[Resource]) startBatch(key string, batchChannel chan operation
 	w := &batch[Resource]{
 		Options:            p.options,
 		resourceKey:        key,
-		incomingOperations: batchChannel,
+		incomingOperations: batchChannels.incomingOperations,
 		stopped:            p.stopped,
 		softDeadline:       now.Add(p.options.MinDuration),
 		hardDeadline:       now.Add(p.options.MaxDuration),
@@ -180,9 +185,8 @@ func (p *Processor[Resource]) startBatch(key string, batchChannel chan operation
 
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	// Delete the channel even though it is still used by pending Run calls.
-	// Those calls should time out and retry on a new channel.
-	delete(p.batchChannels, key)
+	delete(p.batches, key)
+	close(batchChannels.closed)
 }
 
 // Stop ends all running batches. No new operations will be accepted.
