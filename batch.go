@@ -5,6 +5,7 @@ package batch
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -148,7 +149,11 @@ func (p *Processor[Resource]) Run(ctx context.Context, key string, _operation fu
 			return OperationCancelled
 
 		case tempBatch.incomingOperations <- operationMessage:
-			return <-result
+			err := <-result
+			if err != nil {
+				return fmt.Errorf("running batch failed for key '%s': %w", key, err)
+			}
+			return nil
 
 		case <-tempBatch.closed:
 		}

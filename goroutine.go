@@ -5,6 +5,7 @@ package batch
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -79,7 +80,7 @@ func (b *batch[Resource]) save(ctx context.Context) error {
 	}()
 
 	if err := b.SaveResource(ctx, b.resourceKey, *b.resource); err != nil {
-		return err
+		return fmt.Errorf("saving resource failed: %w", err)
 	}
 
 	return nil
@@ -97,7 +98,7 @@ func (b *batch[Resource]) load(ctx context.Context) error {
 
 	resource, err := b.LoadResource(ctx, b.resourceKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("loading resource failed: %w", err)
 	}
 
 	b.resource = &resource
