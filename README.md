@@ -68,7 +68,7 @@ err := processor.Run(ctx, resourceKey, func(r *YourResource) {
 })
 ```
 
-For real-life example see [example web application](_example).
+For real-life example see [example web application](https://github.com/elgopher/batch-example).
 
 ## Installation
 
