@@ -55,7 +55,7 @@ func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource
 	return &Processor[Resource]{
 		options:      options,
 		stopped:      make(chan struct{}),
-		batches:      map[string]temporaryBatch[Resource]{},
+		batches:      newConcurrentMap[temporaryBatch[Resource]](),
 		metricBroker: &metricBroker{},
 	}
 }
@@ -66,7 +66,7 @@ type Processor[Resource any] struct {
 	stopped            chan struct{}
 	allBatchesFinished sync.WaitGroup
 	mutex              sync.Mutex
-	batches            map[string]temporaryBatch[Resource]
+	batches            *concurrentMap[temporaryBatch[Resource]]
 	metricBroker       *metricBroker
 }
 
@@ -162,22 +162,19 @@ func (p *Processor[Resource]) Run(ctx context.Context, key string, _operation fu
 }
 
 func (p *Processor[Resource]) temporaryBatch(key string) temporaryBatch[Resource] {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+	return p.batches.FindOrCreate(key,
+		func(key string) temporaryBatch[Resource] {
+			var tempBatch temporaryBatch[Resource]
+			tempBatch.incomingOperations = make(chan operation[Resource])
+			tempBatch.closed = make(chan struct{})
 
-	batchChannel, ok := p.batches[key]
-	if !ok {
-		batchChannel.incomingOperations = make(chan operation[Resource])
-		batchChannel.closed = make(chan struct{})
-		p.batches[key] = batchChannel
+			go p.startBatch(key, tempBatch)
 
-		go p.startBatch(key, batchChannel)
-	}
-
-	return batchChannel
+			return tempBatch
+		})
 }
 
-func (p *Processor[Resource]) startBatch(key string, batchChannels temporaryBatch[Resource]) {
+func (p *Processor[Resource]) startBatch(key string, tempBatch temporaryBatch[Resource]) {
 	p.allBatchesFinished.Add(1)
 	defer p.allBatchesFinished.Done()
 
@@ -186,7 +183,7 @@ func (p *Processor[Resource]) startBatch(key string, batchChannels temporaryBatc
 	w := &batch[Resource]{
 		Options:            p.options,
 		resourceKey:        key,
-		incomingOperations: batchChannels.incomingOperations,
+		incomingOperations: tempBatch.incomingOperations,
 		stopped:            p.stopped,
 		softDeadline:       now.Add(p.options.MinDuration),
 		hardDeadline:       now.Add(p.options.MaxDuration),
@@ -194,10 +191,9 @@ func (p *Processor[Resource]) startBatch(key string, batchChannels temporaryBatc
 	w.process()
 	p.metricBroker.publish(w.metric)
 
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-	delete(p.batches, key)
-	close(batchChannels.closed)
+	p.batches.DeleteWithCleanup(key, func(key string) {
+		close(tempBatch.closed)
+	})
 }
 
 // Stop ends all running batches. No new operations will be accepted.
