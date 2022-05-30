@@ -55,7 +55,7 @@ func StartProcessor[Resource any](options Options[Resource]) *Processor[Resource
 	return &Processor[Resource]{
 		options:      options,
 		stopped:      make(chan struct{}),
-		batches:      newConcurrentMap[temporaryBatch[Resource]](),
+		batches:      newConcurrentMap[temporaryBatch[Resource]](128),
 		metricBroker: &metricBroker{},
 	}
 }
